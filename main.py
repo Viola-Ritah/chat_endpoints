@@ -152,6 +152,7 @@ if not users_db:
     users_db[test_user["username"]] = test_user
     print(f"Initialized test user with ID {test_user['id']}: {test_user}")
 
+
 def get_user(db, username: str):
     if username in db:
         user_dict = db[username]
