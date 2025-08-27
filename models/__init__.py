@@ -1,4 +1,4 @@
-# from .base import Base
+from .base import Base
 from .user import User
 from .conversation import Message, Conversation, ConversationParticipant
 

@@ -1,5 +1,6 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 import os
 from dotenv import load_dotenv
@@ -8,21 +9,31 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database URL from environment variable or default to local PostgreSQL
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/traveler_app")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/chat_db")
 
-# Create SQLAlchemy engine
-engine = create_engine(DATABASE_URL)
+# Create async engine
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=True,  # Set to False in production
+    future=True
+)
 
-# Create a SessionLocal class for database sessions
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Create async session factory
+async_session = sessionmaker(
+    engine, class_=AsyncSession, expire_on_commit=False
+)
 
 # Base class for models
 Base = declarative_base()
 
-def get_db():
+async def get_db() -> AsyncSession:
     """Dependency to get DB session"""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    async with async_session() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()

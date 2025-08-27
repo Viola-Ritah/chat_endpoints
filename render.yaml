@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: chat-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: chat_db
+          property: connectionString
+      - key: PYTHONUNBUFFERED
+        value: true
+      - key: PYTHONPATH
+        value: /
+      - key: PYTHON_VERSION
+        value: 3.9.0
+      - key: SECRET_KEY
+        generateValue: true
+
+databases:
+  - name: chat_db
+    databaseName: chat_db
+    user: chat_db_user
+    plan: free

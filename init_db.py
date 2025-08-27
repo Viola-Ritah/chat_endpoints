@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 from sqlalchemy.exc import SQLAlchemyError
@@ -10,21 +11,23 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 load_dotenv()
 
 # Import database and models
-from database import engine, Base
+from database import engine, Base, async_session
 from models.user import User
 from models.conversation import Conversation, Message, ConversationParticipant
 
-def init_db():
+async def init_db():
     """Initialize the database by creating all tables."""
     print("🔧 Initializing database...")
     try:
         # Drop all tables first (be careful with this in production!)
         print("Dropping existing tables...")
-        Base.metadata.drop_all(bind=engine)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
         
         # Create all tables
         print("Creating tables...")
-        Base.metadata.create_all(bind=engine)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
         
         print("✅ Database initialized successfully!")
         return True
@@ -37,7 +40,9 @@ def init_db():
         return False
 
 if __name__ == "__main__":
-    if init_db():
+    import asyncio
+    success = asyncio.run(init_db())
+    if success:
         sys.exit(0)
     else:
         sys.exit(1)

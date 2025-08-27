@@ -8,8 +8,13 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import os
+import asyncio
 from dotenv import load_dotenv
 from sqlalchemy.ext.declarative import declarative_base
+
+# Import database initialization
+from database import engine, Base
+from init_db import init_db
 
 # Base class for all models
 Base = declarative_base()
@@ -27,10 +32,19 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url=None,
-    openapi_tags=[
-
-    ],
+    openapi_tags=[],
 )
+
+# Initialize database on startup
+@app.on_event("startup")
+async def startup_db():
+    print("🚀 Starting up database...")
+    # Initialize the database
+    success = await init_db()
+    if not success:
+        print("❌ Failed to initialize database!")
+    else:
+        print("✅ Database initialized successfully!")
 
 # Security scheme for Swagger UI
 security = HTTPBearer()
