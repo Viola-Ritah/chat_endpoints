@@ -37,10 +37,10 @@ app = FastAPI(
 
 # Initialize database on startup
 @app.on_event("startup")
-async def startup_db():
+def startup_db():
     print("🚀 Starting up database...")
     # Initialize the database
-    success = await init_db()
+    success = init_db()
     if not success:
         print("❌ Failed to initialize database!")
     else:
