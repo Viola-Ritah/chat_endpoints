@@ -564,8 +564,6 @@
 #     import uvicorn
 #     uvicorn.run(app, host="0.0.0.0", port=8000)
 
-
-
 from fastapi import FastAPI, Depends, HTTPException, status, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -620,10 +618,11 @@ security = HTTPBearer()
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # In production, replace with your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Security
@@ -942,28 +941,63 @@ async def delete_user(user_id: int, current_user: User = Depends(get_current_use
 
 # Chat WebSocket endpoint
 @app.websocket("/ws/chat/{chat_id}")
-async def websocket_endpoint(websocket: WebSocket, chat_id: int, token: str):
+async def websocket_endpoint(websocket: WebSocket, chat_id: int, token: str = None):
+    await websocket.accept()
+    user = None
+    
     try:
-        # Verify token and get user
-        user = get_current_user(token)
-        if not user:
+        # Get token from query params if not provided
+        if not token and 'token' in websocket.query_params:
+            token = websocket.query_params['token']
+            
+        if not token:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
             
-        await websocket.accept()
+        # Verify token and get user
+        try:
+            user = await get_current_user(token)
+            if not user:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
+        except Exception as e:
+            print(f"Authentication error: {str(e)}")
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+            
+        # Store connection
         active_connections[user.id] = websocket
+        print(f"User {user.id} connected to chat {chat_id}")
+        
+        # Send a welcome message
+        await websocket.send_text(json.dumps({
+            'type': 'connection',
+            'status': 'connected',
+            'user_id': user.id,
+            'chat_id': chat_id
+        }))
         
         while True:
-            data = await websocket.receive_text()
-            message_data = json.loads(data)
-            message_data['chat_id'] = chat_id
-            await handle_websocket_message(user.id, message_data)
-            
+            try:
+                data = await websocket.receive_text()
+                message_data = json.loads(data)
+                message_data['chat_id'] = chat_id
+                await handle_websocket_message(user.id, message_data)
+            except json.JSONDecodeError:
+                print("Invalid JSON received")
+            except Exception as e:
+                print(f"Error processing message: {str(e)}")
+                
     except WebSocketDisconnect:
-        active_connections.pop(user.id, None)
+        if user and user.id in active_connections:
+            active_connections.pop(user.id, None)
+            print(f"User {user.id} disconnected from chat {chat_id}")
     except Exception as e:
         print(f"WebSocket error: {str(e)}")
-        await websocket.close()
+        try:
+            await websocket.close()
+        except:
+            pass
 
 async def handle_websocket_message(sender_id: int, data: dict):
     message_type = data.get('type')
