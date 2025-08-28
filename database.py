@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database URL from environment variable or default to local PostgreSQL
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:postgres@localhost:5432/chat_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "external_database_url")
 
 # Ensure the URL is in the correct format for psycopg2
 if DATABASE_URL.startswith('postgres://'):
