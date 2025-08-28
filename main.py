@@ -939,18 +939,21 @@ async def delete_user(user_id: int, current_user: User = Depends(get_current_use
     
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+from fastapi.websockets import WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
+
 # Chat WebSocket endpoint
 @app.websocket("/ws/chat/{chat_id}")
-async def websocket_endpoint(websocket: WebSocket, chat_id: int, token: str = None):
+async def websocket_endpoint(websocket: WebSocket, chat_id: int):
+    # Accept the connection first to establish the WebSocket
     await websocket.accept()
     user = None
     
     try:
-        # Get token from query params if not provided
-        if not token and 'token' in websocket.query_params:
-            token = websocket.query_params['token']
-            
+        # Get token from query parameters
+        token = websocket.query_params.get('token')
         if not token:
+            print("No token provided")
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
             
@@ -958,6 +961,7 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int, token: str = No
         try:
             user = await get_current_user(token)
             if not user:
+                print("Invalid user")
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 return
         except Exception as e:
@@ -966,34 +970,69 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int, token: str = No
             return
             
         # Store connection
+        if user.id in active_connections:
+            # Close existing connection if any
+            try:
+                await active_connections[user.id].close()
+            except:
+                pass
+        
         active_connections[user.id] = websocket
         print(f"User {user.id} connected to chat {chat_id}")
         
-        # Send a welcome message
-        await websocket.send_text(json.dumps({
-            'type': 'connection',
-            'status': 'connected',
-            'user_id': user.id,
-            'chat_id': chat_id
-        }))
-        
-        while True:
-            try:
-                data = await websocket.receive_text()
-                message_data = json.loads(data)
-                message_data['chat_id'] = chat_id
-                await handle_websocket_message(user.id, message_data)
-            except json.JSONDecodeError:
-                print("Invalid JSON received")
-            except Exception as e:
-                print(f"Error processing message: {str(e)}")
-                
-    except WebSocketDisconnect:
-        if user and user.id in active_connections:
-            active_connections.pop(user.id, None)
-            print(f"User {user.id} disconnected from chat {chat_id}")
+        try:
+            # Send a welcome message
+            await websocket.send_text(json.dumps({
+                'type': 'connection',
+                'status': 'connected',
+                'user_id': user.id,
+                'chat_id': chat_id,
+                'timestamp': datetime.utcnow().isoformat()
+            }))
+            
+            # Main message loop
+            while True:
+                try:
+                    data = await websocket.receive_text()
+                    try:
+                        message_data = json.loads(data)
+                        if message_data.get('type') == 'ping':
+                            # Respond to ping
+                            await websocket.send_text(json.dumps({
+                                'type': 'pong',
+                                'timestamp': datetime.utcnow().isoformat()
+                            }))
+                            continue
+                            
+                        message_data['chat_id'] = chat_id
+                        await handle_websocket_message(user.id, message_data)
+                    except json.JSONDecodeError:
+                        print("Invalid JSON received")
+                    except Exception as e:
+                        print(f"Error processing message: {str(e)}")
+                        
+                except WebSocketDisconnect:
+                    print(f"User {user.id} disconnected from chat {chat_id}")
+                    break
+                except Exception as e:
+                    print(f"WebSocket receive error: {str(e)}")
+                    break
+                    
+        except Exception as e:
+            print(f"WebSocket error: {str(e)}")
+            
     except Exception as e:
-        print(f"WebSocket error: {str(e)}")
+        print(f"WebSocket setup error: {str(e)}")
+    finally:
+        # Clean up
+        if user and user.id in active_connections:
+            try:
+                await active_connections[user.id].close()
+            except:
+                pass
+            active_connections.pop(user.id, None)
+            print(f"Cleaned up connection for user {user.id}")
+            
         try:
             await websocket.close()
         except:
