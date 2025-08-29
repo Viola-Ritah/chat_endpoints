@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 
 
+
 Base = declarative_base()
 
 # Load environment variables
@@ -25,7 +26,7 @@ engine = create_async_engine(
 )
 
 # Create session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=AsyncSession)
 
 # Base class for models
 Base = declarative_base()
