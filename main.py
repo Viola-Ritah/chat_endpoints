@@ -564,7 +564,10 @@
 #     import uvicorn
 #     uvicorn.run(app, host="0.0.0.0", port=8000)
 
-from fastapi import FastAPI, Depends, HTTPException, status, Request, WebSocket, WebSocketDisconnect
+
+
+import json
+from fastapi import FastAPI, Depends, HTTPException, Response, status, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.security.http import HTTPBearer, HTTPAuthorizationCredentials
@@ -574,19 +577,30 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import os
-import asyncio
+# import asyncio
 from dotenv import load_dotenv
 from sqlalchemy.ext.declarative import declarative_base
+import database
+# from models.user import User
+from models.conversation import Conversation, Message, ConversationParticipant
+from models import  conversation
 
 # Import database initialization
 from database import engine, Base
-from init_db import init_db
+# from init_db import init_db
 
 # Base class for all models
-Base = declarative_base()
+# Base = declarative_base()
 
-__all__ = ['Base']
+# __all__ = ['Base']
 
+# user.Base.metadata.create_all(bind=database.engine)
+# conversation.Base.metadata.create_all(bind=database.engine)
+
+async def create_tables():
+    async with database.engine.begin() as conn:
+        await conn.run_sync(conversation.Base.metadata.create_all)
+    
 
 
 # Load environment variables
@@ -601,16 +615,20 @@ app = FastAPI(
     openapi_tags=[],
 )
 
-# Initialize database on startup
 @app.on_event("startup")
-def startup_db():
-    print("🚀 Starting up database...")
-    # Initialize the database
-    success = init_db()
-    if not success:
-        print("❌ Failed to initialize database!")
-    else:
-        print("✅ Database initialized successfully!")
+async def startup():
+    await create_tables()
+
+# Initialize database on startup
+# @app.on_event("startup")
+# def startup_db():
+#     print("🚀 Starting up database...")
+#     # Initialize the database
+#     success = init_db()
+#     if not success:
+#         print("❌ Failed to initialize database!")
+#     else:
+#         print("✅ Database initialized successfully!")
 
 # Security scheme for Swagger UI
 security = HTTPBearer()
@@ -618,11 +636,10 @@ security = HTTPBearer()
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with your frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
 )
 
 # Security
@@ -939,104 +956,30 @@ async def delete_user(user_id: int, current_user: User = Depends(get_current_use
     
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-from fastapi.websockets import WebSocketDisconnect
-from fastapi.encoders import jsonable_encoder
-
 # Chat WebSocket endpoint
 @app.websocket("/ws/chat/{chat_id}")
-async def websocket_endpoint(websocket: WebSocket, chat_id: int):
-    # Accept the connection first to establish the WebSocket
-    await websocket.accept()
-    user = None
-    
+async def websocket_endpoint(websocket: WebSocket, chat_id: int, token: str):
     try:
-        # Get token from query parameters
-        token = websocket.query_params.get('token')
-        if not token:
-            print("No token provided")
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-            
         # Verify token and get user
-        try:
-            user = await get_current_user(token)
-            if not user:
-                print("Invalid user")
-                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-                return
-        except Exception as e:
-            print(f"Authentication error: {str(e)}")
+        user = get_current_user(token)
+        if not user:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
             
-        # Store connection
-        if user.id in active_connections:
-            # Close existing connection if any
-            try:
-                await active_connections[user.id].close()
-            except:
-                pass
-        
+        await websocket.accept()
         active_connections[user.id] = websocket
-        print(f"User {user.id} connected to chat {chat_id}")
         
-        try:
-            # Send a welcome message
-            await websocket.send_text(json.dumps({
-                'type': 'connection',
-                'status': 'connected',
-                'user_id': user.id,
-                'chat_id': chat_id,
-                'timestamp': datetime.utcnow().isoformat()
-            }))
+        while True:
+            data = await websocket.receive_text()
+            message_data = json.loads(data)
+            message_data['chat_id'] = chat_id
+            await handle_websocket_message(user.id, message_data)
             
-            # Main message loop
-            while True:
-                try:
-                    data = await websocket.receive_text()
-                    try:
-                        message_data = json.loads(data)
-                        if message_data.get('type') == 'ping':
-                            # Respond to ping
-                            await websocket.send_text(json.dumps({
-                                'type': 'pong',
-                                'timestamp': datetime.utcnow().isoformat()
-                            }))
-                            continue
-                            
-                        message_data['chat_id'] = chat_id
-                        await handle_websocket_message(user.id, message_data)
-                    except json.JSONDecodeError:
-                        print("Invalid JSON received")
-                    except Exception as e:
-                        print(f"Error processing message: {str(e)}")
-                        
-                except WebSocketDisconnect:
-                    print(f"User {user.id} disconnected from chat {chat_id}")
-                    break
-                except Exception as e:
-                    print(f"WebSocket receive error: {str(e)}")
-                    break
-                    
-        except Exception as e:
-            print(f"WebSocket error: {str(e)}")
-            
+    except WebSocketDisconnect:
+        active_connections.pop(user.id, None)
     except Exception as e:
-        print(f"WebSocket setup error: {str(e)}")
-    finally:
-        # Clean up
-        if user and user.id in active_connections:
-            try:
-                await active_connections[user.id].close()
-            except:
-                pass
-            active_connections.pop(user.id, None)
-            print(f"Cleaned up connection for user {user.id}")
-            
-        try:
-            await websocket.close()
-        except:
-            pass
+        print(f"WebSocket error: {str(e)}")
+        await websocket.close()
 
 async def handle_websocket_message(sender_id: int, data: dict):
     message_type = data.get('type')
