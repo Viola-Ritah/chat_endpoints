@@ -11,7 +11,7 @@ Base = declarative_base()
 load_dotenv()
 
 # Database URL from environment variable or default to local PostgreSQL
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:postgres@localhost:5432/chat_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/chat_db")
 
 # Ensure the URL is in the correct format for psycopg2
 if DATABASE_URL.startswith('postgres://'):
@@ -21,7 +21,7 @@ if DATABASE_URL.startswith('postgres://'):
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,  
-    future=True
+    # future=True
 )
 
 # Create session factory
